@@ -428,7 +428,6 @@ void vmm_entry(void)
 
 
 
-
   displayline("IA32_APIC_BASE=%6\n\r",IA32_APIC_BASE);
   sendstringf("IA32_APIC_BASE=%6\n\r",IA32_APIC_BASE);
   sendstringf("\tLocal APIC base=%6\n\r",IA32_APIC_BASE & 0xfffff000);
@@ -1222,7 +1221,6 @@ void menu2(void)
     displayline("v: control register test\n");
     displayline("e: efer test\n");
     displayline("o: out of memory test\n");
-    displayline("n: NMI Test\n");
 
     if (getDBVMVersion())
     {
@@ -1237,7 +1235,6 @@ void menu2(void)
     key=0;
     while (!key)
     {
-
       if ((!loadedOS) || (showfirstmenu))
       {
 #ifdef DELAYEDSERIAL
@@ -1747,7 +1744,6 @@ void menu(void)
 #endif
     sendstring("Your command:");
 
-
 #ifndef DEBUG
     if (autostart || loadedOS)
     {
@@ -1767,8 +1763,8 @@ void menu(void)
 #endif
       if (loadedOS)
       {
-        command='0';
-//        command=waitforchar();
+//        command='0';
+        command=waitforchar();
 
       }
       else
@@ -2022,19 +2018,6 @@ void menu(void)
           break;
         }
 
-        case 'z':
-        {
-          QWORD old=getCR4();
-          sendstringf("testing cr4 value\n");
-          setCR4(0x370678);
-          sendstringf("pass 1 %8\n", getCR4());
-          setCR4(0x372678);
-          sendstringf("pass 2 %8\n", getCR4());
-          setCR4(old);
-          sendstringf("done\n");
-          break;
-        }
-
        /*
       case  'i':
         showstate();
@@ -2223,10 +2206,13 @@ void startvmx(pcpuinfo currentcpuinfo)
             clearScreen();*/
 
 
+
+
+
           launchVMX(currentcpuinfo);
 
           nosendchar[getAPICID()]=0;
-          sendstring("launchVMX returned. Meh\n");
+          sendstring("launchVMX returned\n");
           while (1) outportb(0x80,0xc9);
 
 

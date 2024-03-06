@@ -108,37 +108,14 @@ void* allocateContiguousMemory(int pagecount)
   }
   else
   {
-
-    if (contiguousMemory==NULL)
+    nosendchar[getAPICID()]=0;
+    sendstringf("contiguousMemoryPagesFree<pagecount");
+    while (1)
     {
-      result=malloc2(pagecount*4096); //assume that on systems without contiguousMemory it is already mapped as one contiguous block to begin with
-
-      QWORD a=VirtualToPhysical(result);
-      int i;
-      for (i=1;i<pagecount;i++)
-      {
-        QWORD b=VirtualToPhysical((void*)((QWORD)result)+4096);
-
-        if (b!=a+4096)
-        {
-          nosendchar[getAPICID()]=0;
-          sendstringf("Failure allocating contiguous memory (not contiguous)\n");
-          while (1);
-        }
-        a=b;
-      }
-    }
-    else
-    {
-      nosendchar[getAPICID()]=0;
       sendstringf("contiguousMemoryPagesFree<pagecount");
-      while (1)
-      {
-        sendstringf("contiguousMemoryPagesFree<pagecount");
 
-        outportb(0x80,0x01);
-        outportb(0x80,0x10);
-      }
+      outportb(0x80,0x01);
+      outportb(0x80,0x10);
     }
   }
 
@@ -504,7 +481,7 @@ QWORD mmFindGlobalMapAddressForSize(int size)
     }
     currentVirtualAddress+=2*1024*1024; //next 2MB
   }
-  
+
   return 0;
 }
 
@@ -592,9 +569,7 @@ void* mapPhysicalMemory(QWORD PhysicalAddress, int size)
 
   pcpuinfo c=getcpuinfo();
 
-  QWORD VirtualAddressBase=(QWORD)getMappedMemoryBase();  //MAPPEDMEMORY+c->cpunr*0x400000;
-
-
+  QWORD VirtualAddressBase=MAPPEDMEMORY+c->cpunr*0x400000;
 
   //find non-present pages
   pos=mmFindMapPositionForSize(c, totalsize);
@@ -923,22 +898,6 @@ QWORD getTotalFreeMemory(QWORD *FullPages)
 }
 
 
-
-int mmIsFreePage(void* address)
-{
-
-  UINT64 offset=(UINT64)address-BASE_VIRTUAL_ADDRESS;
-  int index=offset >> 12;
-  int result=0;
-
-  csEnter(&AllocCS);
-  result=AllocationInfoList[index].BitMask==0;
-  csLeave(&AllocCS);
-
-  return result;
-}
-
-
 void *malloc2(unsigned int size)
 //scans the allocationinfolist for at least a specific number of subsequent 0-bits
 //this version of malloc does not keep a list of alloc sizes, so use free2 and realloc2 for these
@@ -958,7 +917,11 @@ void *malloc2(unsigned int size)
     //todo: optimizations like indexes where empty blocks are
 
     int i;
-    bitmask=(1ULL<<bitcount) - 1;
+    bitmask=1;
+    for (i=1; i<bitcount; i++)
+      bitmask=(bitmask << 1) | 1;
+
+    //bitmask=bitmask-1;
 
     //now shift it through the list. If value & bitmask returns anything else than 0, then it's in use
     //todo: use those new string scan cpu functions
@@ -984,7 +947,7 @@ void *malloc2(unsigned int size)
             //found a block
             //calculate the virtual address and mark it as used (or it with the bitmask)
             *(UINT64*)&(list[i]) |= currentbm;
-            asm volatile ("": : :"memory");
+
             csLeave(&AllocCS);
             return (void *)((UINT64)(BASE_VIRTUAL_ADDRESS+i*(4096/8)+(j*64)));
           }
@@ -1001,7 +964,7 @@ void *malloc2(unsigned int size)
     //just find a full 0 entry and go from there
     int i;
     int minpagecount=size / 4096;
-    if (size & 0xfff)
+    if (size%4096)
       minpagecount++;
 
     csEnter(&AllocCS);
@@ -1009,7 +972,7 @@ void *malloc2(unsigned int size)
     {
       int j;
 
-      if (AllocationInfoList[i].BitMask==0) //found a free 4K block, check if the neighbors are free
+      if (AllocationInfoList[i].BitMask==0) //found a free 4K block, check if the neighbours are free
       {
         int usable=1;
         int sizeleft=size-4096;
@@ -1027,20 +990,22 @@ void *malloc2(unsigned int size)
               if (sizeleft % 64)
                 bitcount++;
 
-              bitmask=(1ULL<<bitcount) - 1;
+              if (bitcount)
+              {
+                int x;
+                bitmask=1;
+                for (x=1; x<bitcount; x++)
+                  bitmask=(bitmask << 1) | 1;
+              }
 
               if ((bitmask & AllocationInfoList[i].BitMask)==0) //it is usable,the first parts of this page are not used
-              {
                 usable=1;
-              }
             }
 
             break;
           }
           else
-          {
             sizeleft-=4096;
-          }
         }
 
         if (usable)
@@ -1061,17 +1026,17 @@ void *malloc2(unsigned int size)
             if (size % 64)
               bitcount++;
             if (bitcount)
-              bitmask=(1ULL << bitcount) - 1;
-            else
-              bitmask=0;
-
+            {
+              int bc;
+              bitmask=1;
+              for (bc=1; bc<bitcount; bc++)
+                bitmask=(bitmask << 1) | 1;
+            }
 
             *(UINT64*)&(AllocationInfoList[x]) |= bitmask;
           }
-          asm volatile ("": : :"memory");
 
           csLeave(&AllocCS);
-
           return (void *)(BASE_VIRTUAL_ADDRESS+i*4096);
         }
       }
@@ -1104,13 +1069,10 @@ void free2(void *address, unsigned int size)
   bitcount=size / 64;
   if (size % 64)
     bitcount++;
-
-  csEnter(&AllocCS);
-
   if (bitcount)
   {
     UINT64 offset=(UINT64)address-BASE_VIRTUAL_ADDRESS;
-    int index=offset >> 12;
+    int index=offset / 4096;
 
     while (bitcount>=64) //size of 64+ are aligned on a page boundary so no need to bitfuck
     {
@@ -1121,22 +1083,26 @@ void free2(void *address, unsigned int size)
 
     if (bitcount)
     {
-      //still some bits left (or started out with being a small chunk
-      int bitoffset=(offset & 0xfff) / 64;
+      //still some bits left
+      int bitoffset=(offset % 4096) / 64;
       int i;
-      bitmask=(1ULL<<bitcount)-1;
+      bitmask=1;
+      for (i=1; i<bitcount; i++)
+        bitmask=(bitmask << 1) | 1;
 
       //shift the bitmask to the start of the allocation (only for small allocs where bitoffset is not 0)
       bitmask=bitmask << bitoffset;
 
       bitmask=~bitmask; //invert the bitmask  (so 000011110000 turns into 111100001111)
 
-
+      csEnter(&AllocCS);
       AllocationInfoList[index].BitMask&=bitmask;
+      csLeave(&AllocCS);
     }
+
   }
 
-  csLeave(&AllocCS);
+
 }
 
 void *realloc2(void *oldaddress, unsigned int oldsize, unsigned int newsize)
@@ -1223,6 +1189,8 @@ void *realloc(void *old, size_t size)
     free(old);
     asm volatile ("": : :"memory");
 
+
+
     csLeave(&AllocCS);
     return result;
   }
@@ -1244,12 +1212,10 @@ void free(void *address)
     if ((i<AllocListPos) && (AllocList[i].size) && (AllocList[i].base==(UINT64)address) )
     {
       int size=AllocList[i].size;
-
+      AllocList[i].size=0;
 
       //memset(address,0xfe, size);
       free2(address, size);
-
-      AllocList[i].size=0;
 
     }
     csLeave(&AllocCS);

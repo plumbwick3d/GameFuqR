@@ -27,9 +27,6 @@
 
 #include "displaydebug.h"
 #include "interrupthandler.h"
-#include "test.h"
-
-#include "apic.h"
 
 
 #ifndef DEBUG
@@ -144,18 +141,14 @@ char * getVMExitReassonString(void)
 	  case 23: return "VMREAD";
     case 24: return "VMRESUME";
 	  case 25: return "VMWRITE";
-	  case vm_exit_vmxoff: return "VMXOFF";
-	  case vm_exit_vmxon: return "VMXON"; //or: omg it's one bee
+	  case 27: return "VMXON"; //or: omg it's one bee
 	  case 28: return "Controlregister access";
 	  case vm_exit_io_access: return "IO Access";
 
 	  case 31: return "RDMSR";
 	  case 32: return "WRMSR";
 	  case 33: return "Invalid guest state";
-	  case 36: return "MWAIT";
 	  case 37: return "Monitor trap flag";
-	  case 39: return "MONITOR";
-	  case 44: return "APIC Access";
 	  case vm_exit_ept_violation: return "EPT Violation";
 	  case vm_exit_ept_misconfiguration: return "EPT Misconfiguration";
 	  case 50: return "INVEPT";
@@ -444,21 +437,7 @@ void sendvmstate(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
 
     PRFLAGS prflags=(PRFLAGS)&rflags;
 
-    sendstringf("GuestASID=%d", currentcpuinfo->vmcb->GuestASID);
     sendstringf("CPL=%d\n", currentcpuinfo->vmcb->CPL);
-
-    if (has_VGIFSupport)
-      sendstringf("V_GIF=%d\n", currentcpuinfo->vmcb->V_GIF);
-    else
-      sendstringf("GIF=%d\n", currentcpuinfo->vmcb_GIF);
-
-    if (registers)
-    {
-      UINT64 *fsbase=(UINT64 *)((UINT64)(&registers->rax)+8);
-      sendstringf("saved FS_BASE_MSR=%6\n", *fsbase);
-    }
-    sendstringf("FS_BASE_MSR=%6\n", readMSR(IA32_FS_BASE_MSR));
-    sendstringf("GS_BASE_MSR=%6\n", readMSR(IA32_GS_BASE_MSR));
 
     if (registers)    // print registers
     {
@@ -494,7 +473,8 @@ void sendvmstate(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
     sendstringf("gdt: base=%6 limit=%x\n\r",currentcpuinfo->vmcb->gdtr_base, currentcpuinfo->vmcb->gdtr_limit);
     sendstringf("idt: base=%6 limit=%x\n\r",currentcpuinfo->vmcb->idtr_base, currentcpuinfo->vmcb->idtr_limit);
 
-    sendstringf("cr0=%6 cr3=%6 cr4=%6 cr8=%6 V_TPR=%d\n\r",currentcpuinfo->vmcb->CR0, currentcpuinfo->vmcb->CR3, currentcpuinfo->vmcb->CR4, getCR8(), currentcpuinfo->vmcb->V_TPR);
+    sendstringf("cr0=%6 cr3=%6 cr4=%6\n\r",currentcpuinfo->vmcb->CR0, currentcpuinfo->vmcb->CR3, currentcpuinfo->vmcb->CR4);
+
 
   }
   else
@@ -645,8 +625,6 @@ void sendvmstate(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
     }
     else
       sendstringf("cr0=%6 cr3=%6 cr4=%6\n\r",vmread(vm_cr0_read_shadow), currentcpuinfo->guestCR3, vmread(vm_cr4_read_shadow));
-
-
   }
 
   if (currentcpuinfo->vmxdata.insideVMXRootMode)
@@ -660,10 +638,6 @@ void sendvmstate(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
 
 #endif
 
-  sendstringf("Pending interrupts:");
-  ShowPendingInterrupts();
-  sendstringf("\n\r");
-
   if (isAMD==0)
   {
     sendstringf("vm_execution_controls_cpu=%6\n", vmread(vm_execution_controls_cpu));
@@ -672,116 +646,10 @@ void sendvmstate(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
       sendstringf("vm_execution_controls_cpu_secondary=%6 (unrestricted=%d)\n", vmread(vm_execution_controls_cpu_secondary), (vmread(vm_execution_controls_cpu_secondary) & SPBEF_ENABLE_UNRESTRICTED)!=0);
     }
   }
-}
 
 
-void sendvmstateFull(pcpuinfo currentcpuinfo UNUSED, VMRegisters *registers UNUSED)
-{
-  sendvmstate(currentcpuinfo, registers);
-
-  sendstring("----------------------------------------\n");
-  sendstring("|                 HOST                 |\n");
-  sendstring("----------------------------------------\n");
-
-  sendstringf("ES=%x\n", vmread(vm_host_es));
-  sendstringf("CS=%x\n", vmread(vm_host_cs));
-  sendstringf("SS=%x\n", vmread(vm_host_ss));
-  sendstringf("DS=%x\n", vmread(vm_host_ds));
-  sendstringf("FS=%x\n", vmread(vm_host_fs));
-  sendstringf("GS=%x\n", vmread(vm_host_gs));
-  sendstringf("TR=%x\n", vmread(vm_host_tr));
-
-  sendstringf("IA32_PAT=%6\n", vmread(vm_host_IA32_PAT));
-  sendstringf("IA32_EFER=%6\n", vmread(vm_host_IA32_EFER));
-  sendstringf("IA32_PERF_GLOBAL_CTRL=%6\n", vmread(vm_host_IA32_PERF_GLOBAL_CTRL));
-
-  sendstringf("IA32_SYSENTER_CS=%x\n", vmread(vm_host_IA32_SYSENTER_CS));
-
-  sendstringf("cr0=%6\n", vmread(vm_host_cr0));
-  sendstringf("cr3=%6\n", vmread(vm_host_cr3));
-  sendstringf("cr4=%6\n", vmread(vm_host_cr4));
-
-  sendstringf("fs_base=%6\n", vmread(vm_host_fs_base));
-  sendstringf("gs_base=%6\n", vmread(vm_host_gs_base));
-  sendstringf("tr_base=%6\n", vmread(vm_host_tr_base));
-  sendstringf("gdt_base=%6\n", vmread(vm_host_gdtr_base));
-  sendstringf("idt_base=%6\n", vmread(vm_host_idtr_base));
-  sendstringf("IA32_SYSENTER_ESP=%6\n", vmread(vm_host_IA32_SYSENTER_ESP));
-  sendstringf("IA32_SYSENTER_EIP=%6\n", vmread(vm_host_IA32_SYSENTER_EIP));
-  sendstringf("vm_host_rsp=%6\n", vmread(vm_host_rsp));
-  sendstringf("vm_host_rip=%6\n", vmread(vm_host_rip));
-
-  if (currentcpuinfo->vmxdata.runningvmx)
-  {
-    sendstring("-----------------------------------------\n");
-    sendstring("|               GUESTHOST               |\n");
-    sendstring("-----------------------------------------\n");
-
-    sendstringf("ES=%x\n", currentcpuinfo->vmxdata.originalhoststate.ES);
-    sendstringf("CS=%x\n", currentcpuinfo->vmxdata.originalhoststate.CS);
-    sendstringf("SS=%x\n", currentcpuinfo->vmxdata.originalhoststate.SS);
-    sendstringf("DS=%x\n", currentcpuinfo->vmxdata.originalhoststate.DS);
-    sendstringf("FS=%x\n", currentcpuinfo->vmxdata.originalhoststate.FS);
-    sendstringf("GS=%x\n", currentcpuinfo->vmxdata.originalhoststate.GS);
-    sendstringf("TR=%x\n", currentcpuinfo->vmxdata.originalhoststate.TR);
-
-    sendstringf("IA32_PAT=%6\n", currentcpuinfo->vmxdata.originalhoststate.IA32_PAT);
-    sendstringf("IA32_EFER=%6\n", currentcpuinfo->vmxdata.originalhoststate.IA32_EFER);
-    sendstringf("IA32_PERF_GLOBAL_CTRL=%6\n", currentcpuinfo->vmxdata.originalhoststate.IA32_PERF_GLOBAL_CTRL);
-
-    sendstringf("IA32_SYSENTER_CS=%x\n", currentcpuinfo->vmxdata.originalhoststate.IA32_SYSENTER_CS);
-
-    sendstringf("cr0=%6\n", currentcpuinfo->vmxdata.originalhoststate.CR0);
-    sendstringf("cr3=%6\n", currentcpuinfo->vmxdata.originalhoststate.CR3);
-    sendstringf("cr4=%6\n", currentcpuinfo->vmxdata.originalhoststate.CR4);
-
-    sendstringf("fs_base=%6\n", currentcpuinfo->vmxdata.originalhoststate.FS_BASE);
-    sendstringf("gs_base=%6\n", currentcpuinfo->vmxdata.originalhoststate.GS_BASE);
-    sendstringf("tr_base=%6\n", currentcpuinfo->vmxdata.originalhoststate.TR_BASE);
-    sendstringf("gdt_base=%6\n", currentcpuinfo->vmxdata.originalhoststate.GDTR_BASE);
-    sendstringf("idt_base=%6\n", currentcpuinfo->vmxdata.originalhoststate.IDTR_BASE);
-    sendstringf("IA32_SYSENTER_ESP=%6\n", currentcpuinfo->vmxdata.originalhoststate.IA32_SYSENTER_ESP);
-    sendstringf("IA32_SYSENTER_EIP=%6\n", currentcpuinfo->vmxdata.originalhoststate.IA32_SYSENTER_EIP);
-    sendstringf("vm_host_rsp=%6\n", currentcpuinfo->vmxdata.originalhoststate.RSP);
-    sendstringf("vm_host_rip=%6\n", currentcpuinfo->vmxdata.originalhoststate.RIP);
-
-
-    sendstring("-----------------------------------------\n");
-    sendstring("|               DBVM                    |\n");
-    sendstring("-----------------------------------------\n");
-
-    sendstringf("ES=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.ES);
-    sendstringf("CS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.CS);
-    sendstringf("SS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.SS);
-    sendstringf("DS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.DS);
-    sendstringf("FS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.FS);
-    sendstringf("GS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.GS);
-    sendstringf("TR=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.TR);
-
-    sendstringf("IA32_PAT=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_PAT);
-    sendstringf("IA32_EFER=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_EFER);
-    sendstringf("IA32_PERF_GLOBAL_CTRL=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_PERF_GLOBAL_CTRL);
-
-    sendstringf("IA32_SYSENTER_CS=%x\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_SYSENTER_CS);
-
-    sendstringf("cr0=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.CR0);
-    sendstringf("cr3=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.CR3);
-    sendstringf("cr4=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.CR4);
-
-    sendstringf("fs_base=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.FS_BASE);
-    sendstringf("gs_base=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.GS_BASE);
-    sendstringf("tr_base=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.TR_BASE);
-    sendstringf("gdt_base=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.GDTR_BASE);
-    sendstringf("idt_base=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IDTR_BASE);
-    sendstringf("IA32_SYSENTER_ESP=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_SYSENTER_ESP);
-    sendstringf("IA32_SYSENTER_EIP=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.IA32_SYSENTER_EIP);
-    sendstringf("vm_host_rsp=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.RSP);
-    sendstringf("vm_host_rip=%6\n", currentcpuinfo->vmxdata.dbvmhoststate.RIP);
-
-  }
 
 }
-
 
 //int autocont=8;
 int twister=0;
@@ -816,8 +684,6 @@ int vmexit_amd(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave UNUSED)
     while (1) outportb(0x80,0xc5);
   }
   vmeventcount++;
-
-
 
 
 
@@ -894,6 +760,7 @@ int lastexitsindex=0;
 criticalSection lastexitsCS={.name="lastexitsCS", .debuglevel=1};
 #endif
 
+
 #ifdef DEBUG
 
 QWORD lastbeat=0;
@@ -911,31 +778,6 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
 	  //sendstringf("*Alive*\n");
 	  lastbeat=_rdtsc();
   }
-
-#ifdef USENMIFORWAIT
-  if (vmread(vm_exit_reason)==0)
-  {
-    VMExit_interruption_information intinfo;
-    intinfo.interruption_information=vmread(vm_exit_interruptioninfo);
-
-    if ((intinfo.interruptvector==2) && (intinfo.type==itNMI) && (currentcpuinfo->WaitTillDone))
-    {
-      nosendchar[getAPICID()]=0;
-      sendstringf("NMI %d waiting till done\n", currentcpuinfo->cpunr);
-      currentcpuinfo->WaitingTillDone=1;
-      //apic_eoi();
-      while (currentcpuinfo->WaitTillDone) _pause();
-
-      sendstringf("NMI %d done waiting\n", currentcpuinfo->cpunr);
-
-      if (currentcpuinfo->eptUpdated)
-        ept_invalidate();
-
-      return 0;
-    }
-  }
-#endif
-
 
 
 
@@ -987,25 +829,6 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
   int haspending=0;
   VMExit_idt_vector_information idtvectorinfo;
   idtvectorinfo.idtvector_info=vmread(vm_idtvector_information);
-
-#ifdef USENMIFORWAIT
-  if (vmread(vm_exit_reason)==0)
-  {
-    VMExit_interruption_information intinfo;
-    intinfo.interruption_information=vmread(vm_exit_interruptioninfo);
-    if ((intinfo.interruptvector==2) && (intinfo.type==itNMI) && (currentcpuinfo->WaitTillDone))
-    {
-      currentcpuinfo->WaitingTillDone=1;
-      while (currentcpuinfo->WaitTillDone) _pause();
-
-      if (currentcpuinfo->eptUpdated)
-        ept_invalidate();
-
-      return 0;
-    }
-  }
-#endif
-
 
 
 
@@ -1069,7 +892,7 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
 
   if (currentcpuinfo->vmxdata.runningvmx)
   {
-    nosendchar[getAPICID()]=0;
+    nosendchar[getAPICID()]=1;
     int r=handleVMEvent(currentcpuinfo, (VMRegisters*)registers, fxsave);
 
     if (dbvm_plugin_exit_post)
@@ -1353,28 +1176,13 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
      //   skip=0;
      //   break;
 //
-      case vm_exit_vmxon:
-        skip=1;
-        break;
-
-      case vm_exit_vmxoff:
-        skip=1;
-        break;
-
-      case vm_exit_vmptrld:
-        skip=1;
-        break;
-
-      case vm_exit_vmclear:
-        skip=1;
-        break;
-
       case vm_exit_vmlaunch:
-        skip=1;
+        verbosity=10;
+        skip=0;
         break;
 
       case vm_exit_vmresume:
-        skip=1;
+        skip=currentcpuinfo->cpunr!=0;
         break;
 
       case vm_exit_vmcall:
@@ -1391,6 +1199,10 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
         skip=1;
         break;
 
+      case vm_exit_vmptrld:
+        //
+
+        break;
 
       case vm_exit_invept:
         skip=1;
@@ -1455,7 +1267,7 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
 
           case 0x80000603:
         	//if (vmread(vmread(vm_idtvector_information))==0)
-        	  skip=1;
+        	  //skip=1;
 
             break;
 
@@ -1481,7 +1293,7 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
 
         //if ((vmread(vm_exit_qualification) & 0xf)==3)
         {
-          skip=1;
+         // skip=1;
         }
 
 
@@ -1592,12 +1404,10 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
         if (debugmode)
           setTrap();
 
-        return result;
+        return 0;
       }
 
       nosendchar[getAPICID()]=0;
-
-      sendstringf("ERROR: handleVMEvent returned %d\n", result);
     }
 
   }
@@ -1618,7 +1428,7 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
 
   enableserial();
   sendstringf("\n\r------------(%d)------------------\n\r",vmeventcount);
-  sendstringf("Hello from vmexit-(cpunr=%d skip=%d)\n",currentcpuinfo->cpunr, skip);
+  sendstringf("Hello from vmexit-(cpunr=%d)",currentcpuinfo->cpunr);
 
 
   sendstringf("currentcpuinfo = %6  : APICID=%d  :  RSP=%6\n\r",(UINT64)currentcpuinfo, getAPICID(), getRSP());
@@ -1706,11 +1516,9 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
     sendstring("|   9: display physical memory          |\n\r");
     sendstring("|   l: Lua Engine                       |\n\r");
     sendstring("|   0: quit virtual machine             |\n\r");
-    sendstring("|   d: test if inside another dbvm      |\n\r");
+  //sendstring("|   p: previous event                   |\n\r");
     sendstring("\\---------------------------------------/\n\r");
     sendstring("Your command:");
-
-
 
 #ifdef DELAYEDSERIAL
     if (!useserial)
@@ -1988,17 +1796,6 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
         break;
       }
 
-      case 'd':
-      {
-        int v=getDBVMVersion();
-        if (v)
-          sendstringf("Yes: %x\n",v);
-        else
-          sendstring("No\n");
-
-        break;
-      }
-
       case 'l' :
       {
 #if (defined SERIALPORT) && (SERIALPORT != 0)
@@ -2075,30 +1872,6 @@ int vmexit(pcpuinfo currentcpuinfo, UINT64 *registers, void *fxsave)
         break;
       }
 
-#ifdef USENMIFORWAIT
-      case 'n':
-      {
-        pcpuinfo c=firstcpuinfo;
-        while (c)
-        {
-          if (c!=currentcpuinfo)
-          {
-            c->WaitingTillDone=0;
-            c->WaitTillDone=1;
-            apic_sendWaitInterrupt(c->apicid-1);
-            while (c->WaitingTillDone==0) _pause();
-
-            sendstringf("%d paused %d\n", currentcpuinfo->cpunr, c->cpunr);
-
-            c->WaitTillDone=0;
-          }
-          c=c->next;
-        }
-        break;
-      }
-#endif
-
-
       default:
         sendstring("Unknown command\n\r");
         break;
@@ -2121,23 +1894,13 @@ void launchVMX_AMD(pcpuinfo currentcpuinfo, POriginalState originalstate)
   sendvmstate(currentcpuinfo, NULL);
 
 
-  nosendchar[getAPICID()]=0;
-  sendstring("Starting...:\n");
-
-  writeMSR(IA32_GS_BASE_MSR, (UINT64)0xcece);
-
-  void *hoststate=malloc(4096);
-
 
   if (originalstate)
-    result=vmxloop_amd(currentcpuinfo, currentcpuinfo->vmcb_PA, VirtualToPhysical(hoststate), &originalstate->rax);
+    result=vmxloop_amd(currentcpuinfo, currentcpuinfo->vmcb_PA, &originalstate->rax);
   else
-    result=vmxloop_amd(currentcpuinfo, currentcpuinfo->vmcb_PA, VirtualToPhysical(hoststate), NULL);
+    result=vmxloop_amd(currentcpuinfo, currentcpuinfo->vmcb_PA, NULL);
 
-  nosendchar[getAPICID()]=0;
-  sendstringf("Returned from vmxloop_amd. Result=%d\n\r", result);
-
-  while (1);
+  displayline("Returned from vmxloop_amd. Result=%d\n\r", result);
 
 }
 
@@ -2164,7 +1927,6 @@ void launchVMX(pcpuinfo currentcpuinfo)
 
   if (isAMD)
     return launchVMX_AMD(currentcpuinfo, originalstate);
-
 
 
 
@@ -2562,7 +2324,6 @@ void CheckGuest(void)
 
 
 */
-
 void displayVMmemory(pcpuinfo currentcpuinfo)
 {
   char temps[17];
@@ -2631,27 +2392,6 @@ void displayVMmemory(pcpuinfo currentcpuinfo)
     sendstring("\n\r");
   }
 
-}
-
-void ShowPendingInterrupts()
-{
-  int i,j;
-
-//0=0-31
-//1=32-63
-  for (i=0; i<8; i++)
-  {
-    DWORD v=ReadAPICRegister(0x20+i);
-    if (v!=0)
-    {
-      int startint=i*32;
-      for (j=0; j<32; j++)
-      {
-        if (v & (1<<j))
-          sendstringf("%2 ", startint+j);
-      }
-    }
-  }
 }
 
 void ShowCurrentInstruction(pcpuinfo currentcpuinfo)
@@ -2735,8 +2475,7 @@ void ShowCurrentInstruction(pcpuinfo currentcpuinfo)
 
 void ShowCurrentInstructions(pcpuinfo currentcpuinfo)
 {
-#define BUFSIZE 120
-  unsigned char buf[BUFSIZE];
+  unsigned char buf[60];
   int     readable;
   int     is64bit=IS64BITCODE(currentcpuinfo);
   UINT64 address;
@@ -2756,15 +2495,15 @@ void ShowCurrentInstructions(pcpuinfo currentcpuinfo)
       address=vmread(vm_guest_cs_base)+vmread(vm_guest_rip);
   }
 
-  int bytesinfront=BUFSIZE / 2;
+  int bytesinfront=30;
   UINT64 startaddress=address-bytesinfront;
 
-  readable=ReadVMMemory(currentcpuinfo, startaddress,buf,BUFSIZE);
+  readable=ReadVMMemory(currentcpuinfo, startaddress,buf,60);
 
   while (!readable) //try till bytesinfront=0
   {
     startaddress=address-bytesinfront;
-    readable=ReadVMMemory(currentcpuinfo, startaddress,buf,BUFSIZE);
+    readable=ReadVMMemory(currentcpuinfo, startaddress,buf,60);
     if (!readable)
     {
       if (bytesinfront==0)
@@ -2780,7 +2519,7 @@ void ShowCurrentInstructions(pcpuinfo currentcpuinfo)
   if (readable)
   {
     //disassemble
-    _DecodedInst disassembled[BUFSIZE/2];
+    _DecodedInst disassembled[22];
     _DecodeType dt=Decode16Bits;
     Access_Rights cs_accessright;
     unsigned int i;
@@ -2812,7 +2551,7 @@ void ShowCurrentInstructions(pcpuinfo currentcpuinfo)
       dt=Decode16Bits;
 
 
-    distorm_decode64(startaddress,buf, BUFSIZE, dt, disassembled, BUFSIZE / 2, &used);
+    distorm_decode(startaddress,buf, 60, dt, disassembled, 22, &used);
 
     if (used)
     {

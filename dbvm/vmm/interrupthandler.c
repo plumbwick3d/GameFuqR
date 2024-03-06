@@ -326,20 +326,26 @@ int cinthandler(unsigned long long *stack, int intnr) //todo: move to it's own s
   int cpunr=0;
 
   thisAPICID=getAPICID();
- // nosendchar[getAPICID()]=0;
+  nosendchar[getAPICID()]=0;
 
   enableserial();
 
   emergencyOutputOnly=0;
 
   sendstring("\n------------------------------------------\n");
-  sendstringf("|             EXCEPTION %d  (%x)               |\n", intnr, intnr);
+  sendstringf("|             EXCEPTION %d               |\n", intnr);
   sendstring("------------------------------------------\n");
 
   ddDrawRectangle(DDHorizontalResolution-100,0,100,100,_rdtsc());
 
   if (readMSR(IA32_FS_BASE_MSR)==0)
   {
+
+#ifdef DEBUG
+  sendstringCS.ignorelock=1;
+  sendstringfCS.ignorelock=1;
+#endif
+
 
     sendstringf("Invalid FS base during exception %d  CR2=%6!!\n",intnr, getCR2());
 
@@ -360,23 +366,6 @@ int cinthandler(unsigned long long *stack, int intnr) //todo: move to it's own s
 
   pcpuinfo cpuinfo=getcpuinfo();
   cpunr=cpuinfo->cpunr;
-
-#ifdef USENMIFORWAIT
-  if ((intnr==2) && (cpuinfo->WaitTillDone))
-  {
-    sendstringf("%d: NMI received while handling a vmexit\n", getcpunr());
-
-    cpuinfo->WaitingTillDone=1;
-    while (cpuinfo->WaitTillDone) _pause();
-
-    if (cpuinfo->eptUpdated)
-      ept_invalidate();
-
-
-    return 0;
-  }
-#endif
-
 
   //debug, remove:
   //if PIC_StillEnabled
@@ -502,7 +491,7 @@ int cinthandler(unsigned long long *stack, int intnr) //todo: move to it's own s
 
   if (cpuinfo->OnException[0].RIP)
   {
-    //nosendchar[thisAPICID]=0;
+    nosendchar[thisAPICID]=0;
     sendstringf("OnException is set. Passing it to longjmp\n");  //no need to set rflags back, the original state contains that info
 
     longjmp(cpuinfo->OnException, 0x100 | intnr);

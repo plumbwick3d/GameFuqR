@@ -68,7 +68,10 @@ void bochsbp(void)
 	asm volatile ("xchg %bx,%bx");
 }
 
-
+void jtagbp(void)
+{
+	asm volatile (".byte 0xf1");
+}
 
 unsigned char inportb(unsigned int port)
 {
@@ -1551,16 +1554,6 @@ int itoa(unsigned int value,int base, char *output,int maxsize)
 	return i; //return how many bytes are used
 }
 
-criticalSection serialCS={.name="serialCS", .debuglevel=2};
-
-void enableserial(void)
-{
-#if (defined SERIALPORT)
-  csEnter(&serialCS);
-  _enableserial();
-  csLeave(&serialCS);
-#endif
-}
 
 void sendchar(char c UNUSED)
 {
@@ -1593,8 +1586,6 @@ void sendchar(char c UNUSED)
   if (c=='\r') //to deal with an obsolete linefeed not needed anymore
     return;
 
-  csEnter(&serialCS);
-
   x=inportb(SERIALPORT+5);
 
   //while ((x & 0x20) != 0x20)
@@ -1618,8 +1609,6 @@ void sendchar(char c UNUSED)
 	    outportb(SERIALPORT,'\r');
 	  }
 	}
-
-	csLeave(&serialCS);
 #endif
 
 }
@@ -1638,8 +1627,6 @@ int getchar(void)
 /* returns 0 when no char is pressed
 	 use readstring to wait for keypresses */
 
-  csEnter(&serialCS);
-
   while ((inportb(SERIALPORT+5) & 0x60) != 0x60)
   {
     _pause();
@@ -1648,21 +1635,11 @@ int getchar(void)
 
 	if (inportb(SERIALPORT+5) & 0x1)
   {
-	  int c=inportb(SERIALPORT);
-	  csLeave(&serialCS);
-
-	  return c;
+    return inportb(SERIALPORT);
   }
 	else
-	{
-	  csLeave(&serialCS);
-		return 0;
-
-	}
-#else
-	return 0;
 #endif
-
+		return 0;
 
 }
 

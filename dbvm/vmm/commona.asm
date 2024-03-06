@@ -192,8 +192,8 @@ ret
 
 
 
-global _enableserial
-_enableserial:
+global enableserial
+enableserial:
 %ifdef SERIALPORT
 %if SERIALPORT != 0
 push rdx

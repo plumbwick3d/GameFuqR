@@ -123,11 +123,29 @@ inline uint64_t rdmsr(uint32_t msr_id)
     return msr_value;
 }*/
 
+EFIAPI VOID FunctionX (IN VOID *Buffer)
+{
+  UINT64 t1,t2,t3, a;
+  t1=getTSC();
+  t2=readMSR(0x10);
+  t3=getTSC();
+  a=readMSR(0x3b);
+  Print(L"AP CPU %d:\n      %ld - %ld - %ld\n      Adjust:%ld\n", (int)Buffer, t1,t2,t3, a);
+
+  writeMSR(0x3b,-getTSC());
+
+  t1=getTSC();
+  t2=readMSR(0x10);
+  t3=getTSC();
+  a=readMSR(0x3b);
+
+  Print(L"AP CPU %d:\n      %ld - %ld - %ld\n      Adjust:%ld\n", (int)Buffer, t1,t2,t3, a);
+}
 
 
 EFIAPI VOID LaunchDBVMAP (IN VOID *Buffer)
 {
- // writeMSR(0x3b,0);
+  writeMSR(0x3b,0);
   Print(L"AP CPU %d entering DBVM mode\n", (int)Buffer);
 
   Print(L"CR0 before = 0x%lx\n", getCR0());
@@ -178,7 +196,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 
   Print(L"efi_main at %lx\n",(UINT64)efi_main);
-  //FunctionX(NULL);
+  FunctionX(NULL);
 /*
   Print(L"Testing 2:\n");
 
@@ -255,13 +273,8 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
   }
 
 
-  UINT64 debugsilicon=readMSR(0xc80);
 
-  Print(L"debugsilicon(0xc80)=%lx\n",debugsilicon);
-
-
-
-  //Input(L"Type something : ", something, 200);
+  Input(L"Type something : ", something, 200);
 
 
   EFI_MP_SERVICES_PROTOCOL *MpProto=NULL;
@@ -301,7 +314,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
   }
 
- // Input(L"Type something : ", something, 200);
+  Input(L"Type something : ", something, 200);
 
 
 
@@ -443,10 +456,10 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 
 
-  //Input(L"Type something : ", something, 200);
+  Input(L"Type something : ", something, 200);
   Print(L"\n");
 
- // if (StrnCmp(something,L"Q",2)!=0)
+  if (StrnCmp(something,L"Q",2)!=0)
   {
     Print(L"launching DBVM\n");
 
@@ -460,7 +473,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     Print(L"Main DBVM CPU loaded. Loading AP cpu\'s:");
 
-   // Input(L"Type something : ", something, 200);
+    Input(L"Type something : ", something, 200);
 
 
     int i;
@@ -480,12 +493,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
   cleanupMemory();
 
+  Input(L"Type something : ", something, 200);
 
-
-
-  //Input(L"Type something : ", something, 200);
-
- // Print(L"Something is %S", something);
+  Print(L"Something is %S", something);
 
 
   SystemTable->BootServices->Exit(ImageHandle, 1,0,NULL);

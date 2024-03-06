@@ -269,9 +269,7 @@ struc vmxloop_amd_stackframe
   saved_rax:      resq 1
   saved_fsbase:   resq 1
   fxsavespace:    resb 512 ;fxsavespace must be aligned
-
-  psavedstate:    resq 1 ;saved param4
-  vmcb_hostsave_PA: resq 1 ;saved param3
+  psavedstate:    resq 1 ;saved param3
   vmcb_PA:        resq 1 ;saved param2
   currentcpuinfo: resq 1 ;saved param1
   ;At entry RSP points here
@@ -286,17 +284,16 @@ global vmxloop_amd
 vmxloop_amd:
 ;xchg bx,bx ;break by bochs
 
-sub rsp, vmxloop_amd_stackframe_size
+sub rsp, vmxloop_amd_stackframe_size-8 ;-8 because the structure assumes returnaddress is in
 
 mov [rsp+currentcpuinfo],rdi
 mov [rsp+vmcb_PA], rsi
-mov [rsp+vmcb_hostsave_PA], rdx
-mov [rsp+psavedstate], rcx
+mov [rsp+psavedstate], rdx
 
 clgi ;no more interrupts from this point on. (Not even some special interrupts)
 
 
-mov rax,rcx
+mov rax,rdx
 cmp rax,0
 je notloadedos_amd
 
@@ -341,37 +338,18 @@ mov rsi,rax
 
 vmrun_loop:
 ;xchg bx,bx
-mov rax,[rsp+vmcb_hostsave_PA]
-vmsave
-
 mov rax,[rsp+vmcb_PA]  ;for those wondering, RAX is stored in the vmcb->RAX field, not here
 vmload
+clgi
+cli
 vmrun ;rax
+cli
+clgi
 vmsave
-
-mov rax,[rsp+vmcb_hostsave_PA]
-vmload ;this way I don't have to fuck with the fsbase msr
 
 
 db 0x48
 fxsave [rsp+fxsavespace]
-movdqa [rsp+fxsavespace+0xA0], xmm0
-movdqa [rsp+fxsavespace+0xB0], xmm1
-movdqa [rsp+fxsavespace+0xC0], xmm2
-movdqa [rsp+fxsavespace+0xD0], xmm3
-movdqa [rsp+fxsavespace+0xE0], xmm4
-movdqa [rsp+fxsavespace+0xF0], xmm5
-movdqa [rsp+fxsavespace+0x100], xmm6
-movdqa [rsp+fxsavespace+0x110], xmm7
-movdqa [rsp+fxsavespace+0x120], xmm8
-movdqa [rsp+fxsavespace+0x130], xmm9
-movdqa [rsp+fxsavespace+0x140], xmm10
-movdqa [rsp+fxsavespace+0x150], xmm11
-movdqa [rsp+fxsavespace+0x160], xmm12
-movdqa [rsp+fxsavespace+0x170], xmm13
-movdqa [rsp+fxsavespace+0x180], xmm14
-movdqa [rsp+fxsavespace+0x190], xmm15
-
 mov [rsp+saved_r15],r15
 mov [rsp+saved_r14],r14
 mov [rsp+saved_r13],r13
@@ -388,7 +366,18 @@ mov [rsp+saved_rcx],rcx
 mov [rsp+saved_rbx],rbx
 mov [rsp+saved_rax],rax
 
+;save guest fs-base
+mov ecx,0c0000100h
+rdmsr
+shl rdx,32
+add rax,rdx
+mov [rsp+saved_fsbase],rax
 
+;restore host fs-base
+mov ecx,0c0000100h
+mov eax,[rsp+currentcpuinfo]
+mov edx,[rsp+currentcpuinfo+4]
+wrmsr
 
 mov rdi,[rsp+currentcpuinfo]
 lea rsi,[rsp+saved_r15] ;vmregisters
@@ -400,26 +389,14 @@ call vmexit_amd
 cmp eax,1
 je vmrun_exit
 
+;restore guest
+mov ecx,0c0000100h ;fs-base
+mov eax,[rsp+saved_fsbase]
+mov edx,[rsp+saved_fsbase+4]
+wrmsr
 
 db 0x48
 fxrstor [rsp+fxsavespace]
-movdqa xmm0, [rsp+fxsavespace+0xA0]
-movdqa xmm1, [rsp+fxsavespace+0xB0]
-movdqa xmm2, [rsp+fxsavespace+0xC0]
-movdqa xmm3, [rsp+fxsavespace+0xD0]
-movdqa xmm4, [rsp+fxsavespace+0xE0]
-movdqa xmm5, [rsp+fxsavespace+0xF0]
-movdqa xmm6, [rsp+fxsavespace+0x100]
-movdqa xmm7, [rsp+fxsavespace+0x110]
-movdqa xmm8, [rsp+fxsavespace+0x120]
-movdqa xmm9, [rsp+fxsavespace+0x130]
-movdqa xmm10, [rsp+fxsavespace+0x140]
-movdqa xmm11, [rsp+fxsavespace+0x150]
-movdqa xmm12, [rsp+fxsavespace+0x160]
-movdqa xmm13, [rsp+fxsavespace+0x170]
-movdqa xmm14, [rsp+fxsavespace+0x180]
-movdqa xmm15, [rsp+fxsavespace+0x190]
-
 mov r15,[rsp+saved_r15]
 mov r14,[rsp+saved_r14]
 mov r13,[rsp+saved_r13]
@@ -443,110 +420,6 @@ jmp vmrun_loop
 vmrun_exit:
 add rsp,vmxloop_amd_stackframe_size-8
 ret
-
-
-global doVMRUN
-;------------------------------------------------------------------------;
-;QWORD doVMRUN(QWORD VMCB_PA, VMRegisters *vmregisters, QWORD dbvmhost_PA, QWORD emulatedhost_PA);
-;------------------------------------------------------------------------;
-doVMRUN:
-;1=rdi=VMCB_PA
-;2=rsi=vmregisters
-;3=rdx=dbvmhost_PA
-;4=rcx=emulatedhost_PA
-xchg bx,bx
-
-sub rsp, vmxloop_amd_stackframe_size-8
-
-;store the host state
-mov [rsp+saved_rbx],rbx
-mov [rsp+saved_rcx],rcx
-mov [rsp+saved_rdx],rdx
-mov [rsp+saved_rbp],rbp
-mov [rsp+saved_rsi],rsi
-mov [rsp+saved_rdi],rdi
-mov [rsp+saved_r8],r8
-mov [rsp+saved_r9],r9
-mov [rsp+saved_r10],r10
-mov [rsp+saved_r11],r11
-mov [rsp+saved_r12],r12
-mov [rsp+saved_r13],r13
-mov [rsp+saved_r14],r14
-mov [rsp+saved_r15],r15
-
-;dbvm doesn't need to store the fxstate. (has nothing stored there anyhow)
-
-mov rax,[rsp+saved_rsi] ;vmregisters (amd stackframe)
-mov r15,[rax+saved_r15]
-mov r14,[rax+saved_r14]
-mov r13,[rax+saved_r13]
-mov r12,[rax+saved_r12]
-mov r11,[rax+saved_r11]
-mov r10,[rax+saved_r10]
-mov r9,[rax+saved_r9]
-mov r8,[rax+saved_r8]
-mov rbp,[rax+saved_rbp]
-mov rsi,[rax+saved_rsi]
-mov rdi,[rax+saved_rdi]
-mov rdx,[rax+saved_rdx]
-mov rcx,[rax+saved_rcx]
-mov rbx,[rax+saved_rbx]
-
-mov rax,[rsp+saved_rdx] ;dbvmhost_pa
-vmsave ;store the current state
-
-mov rax,[rsp+saved_rcx] ;host_pa
-vmload ;load the state of the host right before vmrun
-
-mov rax,[rsp+saved_rdi] ;emulated guest vmcb pa
-vmrun
-mov rax,[rsp+saved_rcx]  ;save the new state to the previous host vmcb (it will be reposible for calling vmsave next)
-vmsave
-
-;restore dbvm state
-mov rax,[rsp+saved_rdx]
-vmload
-
-
-;store the guest state
-mov rax,[rsp+saved_rsi]
-db 0x48
-fxsave [rax+fxsavespace] ;save fpu
-
-mov [rax+saved_rbx],rbx
-mov [rax+saved_rcx],rcx
-mov [rax+saved_rdx],rdx
-mov [rax+saved_rsi],rsi
-mov [rax+saved_rdi],rdi
-mov [rax+saved_rbp],rbp
-mov [rax+saved_r8],r8
-mov [rax+saved_r9],r9
-mov [rax+saved_r10],r10
-mov [rax+saved_r11],r11
-mov [rax+saved_r12],r12
-mov [rax+saved_r13],r13
-mov [rax+saved_r14],r14
-mov [rax+saved_r15],r15
-
-mov rax,[rsp+saved_rax]
-mov rbx,[rsp+saved_rbx]
-mov rcx,[rsp+saved_rcx]
-mov rdx,[rsp+saved_rdx]
-mov rsi,[rsp+saved_rsi]
-mov rdi,[rsp+saved_rdi]
-mov rbp,[rsp+saved_rbp]
-mov r8,[rsp+saved_r8]
-mov r9,[rsp+saved_r9]
-mov r10,[rsp+saved_r10]
-mov r11,[rsp+saved_r11]
-mov r12,[rsp+saved_r12]
-mov r13,[rsp+saved_r13]
-mov r14,[rsp+saved_r14]
-mov r15,[rsp+saved_r15]
-
-add rsp,vmxloop_amd_stackframe_size-8
-ret
-
 
 
 global vmxloop
@@ -686,8 +559,6 @@ vmxloop_vmexit:
 
 ;save registers
 
-;db 0xf1
-
 
 sub rsp,15*8
 
@@ -724,10 +595,10 @@ jne notfucker
 ;xchg bx,bx
 wbinvd
 
-mov rbx,0x681e  ;RIP
+mov rbx,0x681e
 vmread rax,rbx
 
-mov rbx,0x6808  ;CS
+mov rbx,0x6808
 vmread rbx,rbx
 
 
@@ -836,12 +707,8 @@ pop rax
 vmlaunch
 
 
-;db 0xf1 ;debug
-
 ;never executed unless on error
 ;restore state of vmm
-
-
 mov dword [fs:0x10],0xce00 ;exitreason 0xce00
 jmp vmxloop_vmexit
 
@@ -865,10 +732,9 @@ pop rax
 
 vmresume
 
-db 0xf1 ;debug
 
 ;never executed unless on error
-mov dword [fs:0x10],0xce01 ;exitreason 0xce01  (resume fail)
+mov dword [fs:0x10],0xce00 ;exitreason 0xce00
 jmp vmxloop_vmexit
 
 vmxloop_exitvm:  ;(esp-68)
@@ -3044,8 +2910,6 @@ mov eax,[0x700c] ;edx
 mov al,dl ;save dl
 mov edx,eax
 
-
-
 mov eax,[0x7000]
 mov ebx,[0x7004]
 mov ecx,[0x7008]
@@ -3066,7 +2930,13 @@ pop ax
 
 
 beforeboot:
-xchg bx,bx
+nop
+nop
+cpuid
+nop
+
+
+
 ;jmp beforeboot
 ;int 19h
 

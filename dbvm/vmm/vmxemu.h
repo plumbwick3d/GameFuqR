@@ -34,11 +34,8 @@ typedef struct _instruction_info_vm
 
 
 int handleIntelVMXInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters);
-int emulateVMExit(pcpuinfo currentcpuinfo, VMRegisters *vmregisters);
+int handleByGuest(pcpuinfo currentcpuinfo, VMRegisters *vmregisters);
+
 extern int emulatevmx;
-
-
-//amd
-int handleAMDVMRUNInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave);
 
 #endif /* VMM_VMXEMU_H_ */
